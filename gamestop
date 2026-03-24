@@ -144,11 +144,11 @@ CREATE TABLE System_Audit (
     change_summary TEXT
 );
 
+show tables;
 
 
 DELIMITER //
 
--- 1. Automate Stock Deduction
 CREATE TRIGGER trg_process_ticket_stock
 AFTER INSERT ON Ticket_Items
 FOR EACH ROW
@@ -158,7 +158,6 @@ BEGIN
     WHERE product_id = NEW.product_id;
 END //
 
--- 2. Automate Ticket Calculations (Tax & Total)
 CREATE TRIGGER trg_finalize_ticket_totals
 BEFORE INSERT ON Tickets
 FOR EACH ROW
@@ -167,7 +166,7 @@ BEGIN
     SET NEW.total_amount = NEW.subtotal + NEW.tax_amount;
 END //
 
--- 3. Loyalty Point Awarding (1 point per $20)
+
 CREATE TRIGGER trg_reward_points
 AFTER INSERT ON Tickets
 FOR EACH ROW
@@ -177,7 +176,7 @@ BEGIN
     WHERE customer_id = NEW.customer_id;
 END //
 
--- 4. Audit Logic for Price Changes
+
 CREATE TRIGGER trg_audit_price_changes
 AFTER UPDATE ON Inventory
 FOR EACH ROW
@@ -242,7 +241,6 @@ INSERT INTO Employees (first_name, last_name, employee_code, role_id, dept_id, b
 ('Samus', 'Aran', 'EMP-001', 1, 1, 1, 95000.00),
 ('Doom', 'Guy', 'EMP-666', 3, 2, 1, 45000.00);
 
--- MOCK TRANSACTION
 INSERT INTO Tickets (ticket_number, customer_id, employee_id, branch_id, subtotal) 
 VALUES ('TKT-2024-001', 1, 2, 1, 129.98);
 
