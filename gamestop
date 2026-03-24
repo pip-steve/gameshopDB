@@ -1,0 +1,274 @@
+CREATE DATABASE VideoGameStore;
+USE VideoGameStore;
+
+-- =========================================
+-- 1. ORGANIZATIONAL STRUCTURE
+-- =========================================
+
+CREATE TABLE Roles (
+    role_id INT AUTO_INCREMENT PRIMARY KEY,
+    role_name VARCHAR(50) NOT NULL,
+    access_level INT DEFAULT 1,
+    description TEXT
+);
+
+CREATE TABLE Departments (
+    department_id INT AUTO_INCREMENT PRIMARY KEY,
+    dept_name VARCHAR(50) NOT NULL,
+    budget_code VARCHAR(10) UNIQUE
+);
+
+CREATE TABLE Branches (
+    branch_id INT AUTO_INCREMENT PRIMARY KEY,
+    branch_name VARCHAR(100) NOT NULL,
+    tax_id VARCHAR(20) UNIQUE,
+    address TEXT,
+    phone VARCHAR(20),
+    manager_name VARCHAR(100),
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- =========================================
+-- 2. HUMAN RESOURCES & VENDORS
+-- =========================================
+
+CREATE TABLE Employees (
+    employee_id INT AUTO_INCREMENT PRIMARY KEY,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    employee_code VARCHAR(10) UNIQUE,
+    email VARCHAR(100) UNIQUE,
+    salary DECIMAL(12,2),
+    role_id INT,
+    dept_id INT,
+    branch_id INT,
+    hire_date DATE DEFAULT (CURRENT_DATE),
+    FOREIGN KEY (role_id) REFERENCES Roles(role_id),
+    FOREIGN KEY (dept_id) REFERENCES Departments(department_id),
+    FOREIGN KEY (branch_id) REFERENCES Branches(branch_id)
+);
+
+CREATE TABLE Suppliers (
+    supplier_id INT AUTO_INCREMENT PRIMARY KEY,
+    company_name VARCHAR(100) NOT NULL,
+    contact_email VARCHAR(100),
+    support_phone VARCHAR(20),
+    contract_start_date DATE,
+    credit_limit DECIMAL(15,2)
+);
+
+-- =========================================
+-- 3. PRODUCT CATALOG
+-- =========================================
+
+CREATE TABLE Categories (
+    category_id INT AUTO_INCREMENT PRIMARY KEY,
+    cat_name VARCHAR(50) NOT NULL,
+    description VARCHAR(255)
+);
+
+CREATE TABLE Inventory (
+    product_id INT AUTO_INCREMENT PRIMARY KEY,
+    sku VARCHAR(30) UNIQUE NOT NULL,
+    product_name VARCHAR(150) NOT NULL,
+    specs_json JSON,
+    base_price DECIMAL(10,2) NOT NULL,
+    current_stock INT DEFAULT 0,
+    min_stock_threshold INT DEFAULT 5,
+    category_id INT,
+    supplier_id INT,
+    last_restock_date DATETIME,
+    FOREIGN KEY (category_id) REFERENCES Categories(category_id),
+    FOREIGN KEY (supplier_id) REFERENCES Suppliers(supplier_id)
+);
+
+-- =========================================
+-- 4. CUSTOMER BASE
+-- =========================================
+
+CREATE TABLE Customers (
+    customer_id INT AUTO_INCREMENT PRIMARY KEY,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    email VARCHAR(100) UNIQUE,
+    phone VARCHAR(20),
+    registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE Loyal_Customers (
+    loyalty_id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT UNIQUE,
+    loyalty_points INT DEFAULT 0,
+    membership_tier ENUM('BRONZE', 'SILVER', 'GOLD', 'ELITE') DEFAULT 'BRONZE',
+    FOREIGN KEY (customer_id) REFERENCES Customers(customer_id)
+);
+
+-- =========================================
+-- 5. TICKETING & SALES (THE TICKET ENGINE)
+-- =========================================
+
+CREATE TABLE Tickets (
+    ticket_id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_number VARCHAR(50) UNIQUE NOT NULL, -- e.g., TKT-2024-001
+    issue_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    customer_id INT,
+    employee_id INT,
+    branch_id INT,
+    subtotal DECIMAL(10,2) DEFAULT 0.00,
+    tax_rate DECIMAL(5,2) DEFAULT 0.16, -- 16% Tax
+    tax_amount DECIMAL(10,2) DEFAULT 0.00,
+    total_amount DECIMAL(10,2) DEFAULT 0.00,
+    status ENUM('PAID', 'CANCELLED', 'REFUNDED') DEFAULT 'PAID',
+    FOREIGN KEY (customer_id) REFERENCES Customers(customer_id),
+    FOREIGN KEY (employee_id) REFERENCES Employees(employee_id),
+    FOREIGN KEY (branch_id) REFERENCES Branches(branch_id)
+);
+
+CREATE TABLE Ticket_Items (
+    item_id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT,
+    product_id INT,
+    quantity INT NOT NULL,
+    unit_price_sold DECIMAL(10,2) NOT NULL,
+    line_total DECIMAL(10,2) AS (quantity * unit_price_sold),
+    FOREIGN KEY (ticket_id) REFERENCES Tickets(ticket_id),
+    FOREIGN KEY (product_id) REFERENCES Inventory(product_id)
+);
+
+CREATE TABLE Payment_Details (
+    payment_id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT,
+    payment_method ENUM('CASH', 'DEBIT', 'CREDIT', 'CRYPTO', 'POINTS'),
+    transaction_ref VARCHAR(100),
+    payment_status VARCHAR(20) DEFAULT 'COMPLETED',
+    FOREIGN KEY (ticket_id) REFERENCES Tickets(ticket_id)
+);
+
+-- =========================================
+-- 6. SYSTEM AUDIT
+-- =========================================
+
+CREATE TABLE System_Audit (
+    audit_id INT AUTO_INCREMENT PRIMARY KEY,
+    event_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    affected_table VARCHAR(50),
+    operation_type VARCHAR(20),
+    row_reference_id INT,
+    user_identity VARCHAR(50),
+    change_summary TEXT
+);
+
+-- =========================================
+-- 7. BUSINESS AUTOMATION (TRIGGERS)
+-- =========================================
+
+DELIMITER //
+
+-- 1. Automate Stock Deduction
+CREATE TRIGGER trg_process_ticket_stock
+AFTER INSERT ON Ticket_Items
+FOR EACH ROW
+BEGIN
+    UPDATE Inventory 
+    SET current_stock = current_stock - NEW.quantity 
+    WHERE product_id = NEW.product_id;
+END //
+
+-- 2. Automate Ticket Calculations (Tax & Total)
+CREATE TRIGGER trg_finalize_ticket_totals
+BEFORE INSERT ON Tickets
+FOR EACH ROW
+BEGIN
+    SET NEW.tax_amount = NEW.subtotal * NEW.tax_rate;
+    SET NEW.total_amount = NEW.subtotal + NEW.tax_amount;
+END //
+
+-- 3. Loyalty Point Awarding (1 point per $20)
+CREATE TRIGGER trg_reward_points
+AFTER INSERT ON Tickets
+FOR EACH ROW
+BEGIN
+    UPDATE Loyal_Customers 
+    SET loyalty_points = loyalty_points + FLOOR(NEW.total_amount / 20)
+    WHERE customer_id = NEW.customer_id;
+END //
+
+-- 4. Audit Logic for Price Changes
+CREATE TRIGGER trg_audit_price_changes
+AFTER UPDATE ON Inventory
+FOR EACH ROW
+BEGIN
+    IF OLD.base_price <> NEW.base_price THEN
+        INSERT INTO System_Audit (affected_table, operation_type, row_reference_id, user_identity, change_summary)
+        VALUES ('Inventory', 'PRICE_UPDATE', NEW.product_id, CURRENT_USER(), 
+                CONCAT('Price changed from ', OLD.base_price, ' to ', NEW.base_price));
+    END IF;
+END //
+
+DELIMITER ;
+
+-- =========================================
+-- 8. ANALYTICS VIEWS
+-- =========================================
+
+CREATE VIEW View_Daily_Sales AS
+SELECT 
+    DATE(issue_date) AS Sale_Date, 
+    COUNT(ticket_id) AS Tickets_Issued, 
+    SUM(total_amount) AS Gross_Revenue
+FROM Tickets
+GROUP BY DATE(issue_date);
+
+-- =========================================
+-- 9. INITIAL DATA SEEDING (MANUAL)
+-- =========================================
+
+INSERT INTO Roles (role_name, access_level, description) VALUES 
+('SysAdmin', 10, 'Universal Access'),
+('StoreManager', 5, 'Branch level management'),
+('SalesAssociate', 2, 'Register and Customer ops'),
+('InvClerk', 3, 'Inventory and Logistics');
+
+INSERT INTO Departments (dept_name, budget_code) VALUES 
+('Headquarters', 'HQ-001'),
+('Retail Operations', 'RET-005'),
+('Shipping', 'LOG-009');
+
+INSERT INTO Branches (branch_name, tax_id, address, phone, manager_name) VALUES 
+('Gamer Central Tokyo', 'JP-TAX-777', 'Akihabara St 101', '03-999-000', 'Ken Masters'),
+('The Grid SF', 'US-TAX-101', 'Market St 55', '415-001-992', 'Jill Valentine'),
+('Neo London', 'UK-TAX-202', 'Baker St 221B', '020-7946-00', 'Leon Kennedy');
+
+INSERT INTO Categories (cat_name, description) VALUES 
+('New Releases', 'Games released in the last 30 days'),
+('Retro', 'Consoles and games pre-2005'),
+('PC Components', 'GPUs, RAM, and Peripherals'),
+('Limited Editions', 'Collector sets and figurines');
+
+INSERT INTO Suppliers (company_name, contact_email) VALUES 
+('Sony Int', 'supply@sony.com'), ('Nintendo Corp', 'retail@nintendo.jp'), ('Valve', 'distro@steam.com');
+
+INSERT INTO Inventory (sku, product_name, base_price, current_stock, category_id, supplier_id) VALUES 
+('PS5-DS-001', 'Death Stranding 2', 69.99, 100, 1, 1),
+('SW-ZEL-099', 'Zelda: Tears of Kingdom', 59.99, 250, 2, 2),
+('PC-GPU-4090', 'RTX 4090 GPU', 1599.99, 10, 3, 3),
+('COL-FIG-05', 'Cloud Strife 1/6 Figure', 349.99, 5, 4, 1);
+
+INSERT INTO Customers (first_name, last_name, email) VALUES 
+('Solid', 'Snake', 'snake@foxhound.com'), ('Claire', 'Redfield', 'claire@terra.org');
+
+INSERT INTO Loyal_Customers (customer_id, loyalty_points) VALUES (1, 500), (2, 100);
+
+INSERT INTO Employees (first_name, last_name, employee_code, role_id, dept_id, branch_id, salary) VALUES 
+('Samus', 'Aran', 'EMP-001', 1, 1, 1, 95000.00),
+('Doom', 'Guy', 'EMP-666', 3, 2, 1, 45000.00);
+
+-- MOCK TRANSACTION
+INSERT INTO Tickets (ticket_number, customer_id, employee_id, branch_id, subtotal) 
+VALUES ('TKT-2024-001', 1, 2, 1, 129.98);
+
+INSERT INTO Ticket_Items (ticket_id, product_id, quantity, unit_price_sold) 
+VALUES (1, 1, 1, 69.99), (1, 2, 1, 59.99);
+
+INSERT INTO Payment_Details (ticket_id, payment_method, transaction_ref) 
+VALUES (1, 'CREDIT', 'AUTH-992811');
