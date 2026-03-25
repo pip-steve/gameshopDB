@@ -209,6 +209,25 @@ SELECT
 FROM Tickets
 GROUP BY DATE(issue_date);
 
+CREATE VIEW View_Low_Stock AS
+SELECT 
+    sku, 
+    product_name, 
+    current_stock, 
+    min_stock_threshold,
+    (min_stock_threshold - current_stock) AS amount_to_reorder
+FROM Inventory
+WHERE current_stock <= min_stock_threshold;
+
+CREATE VIEW View_Top_Selling_Products AS
+SELECT 
+    p.product_name, 
+    SUM(ti.quantity) AS total_units_sold, 
+    SUM(ti.line_total) AS total_revenue
+FROM Ticket_Items ti
+JOIN Inventory p ON ti.product_id = p.product_id
+GROUP BY p.product_id, p.product_name
+ORDER BY total_revenue DESC;
 
 
 INSERT INTO Roles (role_name, access_level, description) VALUES 
