@@ -158,24 +158,34 @@ BEGIN
     WHERE product_id = NEW.product_id;
 END //
 
-CREATE TRIGGER trg_finalize_ticket_totals
-BEFORE INSERT ON Tickets
+CREATE TRIGGER trg_update_ticket_after_item_insert
+AFTER INSERT ON Ticket_Items
 FOR EACH ROW
 BEGIN
-    SET NEW.tax_amount = NEW.subtotal * NEW.tax_rate;
-    SET NEW.total_amount = NEW.subtotal + NEW.tax_amount;
+    DECLARE new_subtotal DECIMAL(10,2);
+    
+    SELECT SUM(line_total) INTO new_subtotal 
+    FROM Ticket_Items 
+    WHERE ticket_id = NEW.ticket_id;
+
+    UPDATE Tickets 
+    SET 
+        subtotal = new_subtotal,
+        tax_amount = new_subtotal * tax_rate,
+        total_amount = new_subtotal + (new_subtotal * tax_rate)
+    WHERE ticket_id = NEW.ticket_id;
 END //
 
-
-CREATE TRIGGER trg_reward_points
-AFTER INSERT ON Tickets
+CREATE TRIGGER trg_reward_points_on_update
+AFTER UPDATE ON Tickets
 FOR EACH ROW
 BEGIN
-    UPDATE Loyal_Customers 
-    SET loyalty_points = loyalty_points + FLOOR(NEW.total_amount / 20)
-    WHERE customer_id = NEW.customer_id;
+    IF OLD.total_amount <> NEW.total_amount AND NEW.total_amount > 0 THEN
+        UPDATE Loyal_Customers 
+        SET loyalty_points = loyalty_points + FLOOR(NEW.total_amount / 20)
+        WHERE customer_id = NEW.customer_id;
+    END IF;
 END //
-
 
 CREATE TRIGGER trg_audit_price_changes
 AFTER UPDATE ON Inventory
